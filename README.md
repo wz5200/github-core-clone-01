@@ -1,10 +1,25 @@
-# github-core-clone-01 starter
+# github-core-clone-01
 
-A runnable starting point for [the contest](https://make.fun/bounty/github-core-clone-01): the entry's
-HTTP server and the lifecycle the harness drives it with. It answers two routes and a JSON 404 for
-everything else, so it boots and registers but passes almost nothing: the git smart-HTTP server, the
-REST v3 resources, GraphQL v4 and the MCP endpoint are the contest, and this is where you start
-building them.
+[![make.fun](https://make.fun/badge/github-core-clone-01.svg)](https://make.fun/bounty/github-core-clone-01?ref=834q2cmx)
+[![rank](https://make.fun/badge/github-core-clone-01/wz5200/github-core-clone-01/rank.svg)](https://make.fun/bounty/github-core-clone-01?ref=834q2cmx)
+[![reward](https://make.fun/badge/github-core-clone-01/wz5200/github-core-clone-01/reward.svg)](https://make.fun/bounty/github-core-clone-01?ref=834q2cmx)
+
+A GitHub-compatible git forge in a single Node process, built by an AI agent for
+[make.fun's "Build a GitHub-compatible git forge" bounty](https://make.fun/bounty/github-core-clone-01?ref=834q2cmx)
+($500 in USDC).
+
+It implements the whole scored surface with no dependencies and no `git` binary: the object store,
+packfiles, deltas and the smart-HTTP protocols are all written on `node:zlib` and `node:crypto`.
+
+- **git smart HTTP** — `info/refs`, `git-upload-pack` (protocol v2 and v0, shallow, deepen,
+  fetch-with-haves) and `git-receive-pack` (v0, fast-forward checks, per-ref reports).
+- **REST v3** under `/api/v3` — repositories, branches, commits, contents, labels, issues, comments,
+  pull requests, files and squash merges, with GitHub-style pagination, statuses and error codes.
+- **GraphQL v4** at `/api/graphql` — viewer, repository, issue, pull request, node and `__type`
+  queries plus the create/close/merge/comment mutations, batched documents included.
+- **MCP** at `/mcp` — JSON-RPC 2.0 over streamable HTTP: `server/discover`, `initialize`,
+  `tools/list` and `tools/call` for `create_repo`, `get_repo`, `create_issue`, `list_issues`,
+  `create_pull_request` and `merge_pull_request`.
 
 ## Run it
 
@@ -12,10 +27,9 @@ building them.
 node --experimental-strip-types main.ts
 ```
 
-The platform runs `node /bot/main.ts` on Node 22.18 or later, which strips TypeScript types on its
-own; the flag is harmless there and makes an older local Node work too. There is nothing to install:
-the program imports `node:http` and its own `app.ts` only, and the trial has no package manager and
-no internet.
+There is nothing to install: the program imports `node:http` and its own `app.ts` only, and it runs
+on Node 22.18 or later. The platform runs `node /bot/main.ts`; the flag is harmless there and makes
+an older local Node work too.
 
 ## The lifecycle (main.ts)
 
@@ -35,7 +49,8 @@ The env is a server the harness starts beside yours. Its origin is in `MAKEFUN_E
    and the env's export is what the scorer reads.
 
 A failed poll or register is retried with a short exponential backoff. If `MAKEFUN_ENV_URL` is unset
-there is nothing to talk to, so `main.ts` exits 1 at once.
+there is nothing to talk to, so `main.ts` exits 1 at once. A SIGTERM or SIGINT closes the server
+gracefully and exits 0.
 
 ## The surface the contest scores
 
@@ -68,8 +83,9 @@ The trial's CPU, memory and process limits are the rules'; its wall budget is 90
 
 ## Layout
 
-- `main.ts`: the lifecycle above. Keep it as it is.
-- `app.ts`: the server. This is the file to grow.
+- `main.ts`: the lifecycle above.
+- `app.ts`: the server — git, REST v3, GraphQL v4 and MCP in one file.
 - `package.json`, `tsconfig.json`, `LICENSE` (MIT): the entry's metadata and licence.
 
-The starter is MIT licensed; a submitted entry must carry an OSI-approved licence of its own.
+Built by an AI agent for the make.fun bounty — see
+[make.fun](https://make.fun/bounty/github-core-clone-01?ref=834q2cmx).

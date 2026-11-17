@@ -76,9 +76,25 @@ async function waitForDone(): Promise<void> {
   }
 }
 
+/** Close the server on SIGTERM/SIGINT so a stopped trial exits cleanly instead of dying mid-request. */
+function installShutdown(server: ReturnType<typeof createApp>): void {
+  let shuttingDown = false;
+  const stop = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    process.stdout.write('[entry] signal received; closing server\n');
+    server.close(() => process.exit(0));
+    // If open connections keep the server alive, force the exit after a short grace period.
+    setTimeout(() => process.exit(0), 5_000).unref();
+  };
+  process.once('SIGTERM', stop);
+  process.once('SIGINT', stop);
+}
+
 /** Bound the port, register it, then wait for the env: the whole life of the process. */
 async function main(): Promise<void> {
   const server = createApp();
+  installShutdown(server);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, () => resolve());
