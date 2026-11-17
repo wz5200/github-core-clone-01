@@ -1751,7 +1751,7 @@ function planFetch(repo: Repo, wants: readonly string[], haves: readonly string[
   return { sendCommits: within, shallow, unshallow };
 }
 
-function fetchObjects(repo: Repo, plan: FetchPlan, wants: readonly string[]): Map<string, GitObject> {
+function fetchObjects(repo: Repo, plan: FetchPlan, wants: readonly string[], haves: readonly string[]): Map<string, GitObject> {
   const out = new Map<string, GitObject>();
   const addTreeClosure = (treeOid: string): void => {
     const stack = [treeOid];
@@ -1784,6 +1784,9 @@ function fetchObjects(repo: Repo, plan: FetchPlan, wants: readonly string[]): Ma
   }
   // Only the send set's commits travel: their trees and blobs, never their ancestors.
   for (const oid of plan.sendCommits) addCommitRoot(oid);
+  // And never an object the client already holds (reachable from its haves): an unchanged
+  // blob in the new tree is held, not new.
+  for (const oid of repo.reachableObjects(haves).keys()) out.delete(oid);
   return out;
 }
 
@@ -1818,7 +1821,7 @@ function handleUploadPack(req: IncomingMessage, res: ServerResponse, repo: Repo,
       else if (text === 'done') inHaves = true;
     }
     const plan = planFetch(repo, wants, haves, shallowHeld, depth);
-    const objects = fetchObjects(repo, plan, wants);
+    const objects = fetchObjects(repo, plan, wants, haves);
     const pack = writePack(objects.values());
     const out: Buffer[] = [pktLine('NAK\n')];
     for (const oid of plan.shallow) out.push(pktLine(`shallow ${oid}\n`));
@@ -1886,7 +1889,7 @@ function handleUploadPack(req: IncomingMessage, res: ServerResponse, repo: Repo,
       else if (arg === 'done') done = true;
     }
     const plan = planFetch(repo, wants, haves, shallowHeld, depth);
-    const objects = fetchObjects(repo, plan, wants);
+    const objects = fetchObjects(repo, plan, wants, haves);
     const pack = writePack(objects.values());
     const out: Buffer[] = [];
     // Real git (and the kit client) send `done` with the fetch: the response then carries
