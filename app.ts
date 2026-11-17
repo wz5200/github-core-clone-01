@@ -1751,7 +1751,47 @@ function planFetch(repo: Repo, wants: readonly string[], haves: readonly string[
   return { sendCommits: within, shallow, unshallow };
 }
 
-function fetchObjects(repo: Repo, plan: FetchPlan, wants: readonly string[], haves: readonly string[]): Map<string, GitObject> {
+/** Objects the client already holds: reachable from its haves, but never past a shallow boundary. */
+function heldObjects(repo: Repo, haves: readonly string[], shallowHeld: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  const shallowSet = new Set(shallowHeld);
+  const addTreeClosure = (treeOid: string): void => {
+    const stack = [treeOid];
+    const seen = new Set<string>();
+    while (stack.length > 0) {
+      const oid = stack.pop() as string;
+      if (seen.has(oid)) continue;
+      seen.add(oid);
+      const obj = repo.getObject(oid);
+      if (obj === undefined) continue;
+      out.add(oid);
+      if (obj.type === 'tree') for (const entry of parseTree(obj.data)) stack.push(entry.oid);
+    }
+  };
+  const stack = [...haves];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const oid = stack.pop() as string;
+    if (seen.has(oid)) continue;
+    seen.add(oid);
+    const obj = repo.getObject(oid);
+    if (obj === undefined) continue;
+    out.add(oid);
+    if (obj.type === 'commit') {
+      const view = parseCommit(obj.data);
+      if (view.tree !== '') addTreeClosure(view.tree);
+      // A shallow boundary's parents are absent on the client: never walk past one.
+      if (!shallowSet.has(oid)) for (const parent of view.parents) stack.push(parent);
+    } else if (obj.type === 'tree') {
+      addTreeClosure(oid);
+    } else if (obj.type === 'tag') {
+      stack.push(parseTag(obj.data).object);
+    }
+  }
+  return out;
+}
+
+function fetchObjects(repo: Repo, plan: FetchPlan, wants: readonly string[], haves: readonly string[], shallowHeld: readonly string[]): Map<string, GitObject> {
   const out = new Map<string, GitObject>();
   const addTreeClosure = (treeOid: string): void => {
     const stack = [treeOid];
@@ -1784,9 +1824,9 @@ function fetchObjects(repo: Repo, plan: FetchPlan, wants: readonly string[], hav
   }
   // Only the send set's commits travel: their trees and blobs, never their ancestors.
   for (const oid of plan.sendCommits) addCommitRoot(oid);
-  // And never an object the client already holds (reachable from its haves): an unchanged
-  // blob in the new tree is held, not new.
-  for (const oid of repo.reachableObjects(haves).keys()) out.delete(oid);
+  // And never an object the client already holds (reachable from its haves, stopping at
+  // shallow boundaries): an unchanged blob in the new tree is held, not new.
+  for (const oid of heldObjects(repo, haves, shallowHeld)) out.delete(oid);
   return out;
 }
 
@@ -1821,7 +1861,7 @@ function handleUploadPack(req: IncomingMessage, res: ServerResponse, repo: Repo,
       else if (text === 'done') inHaves = true;
     }
     const plan = planFetch(repo, wants, haves, shallowHeld, depth);
-    const objects = fetchObjects(repo, plan, wants, haves);
+    const objects = fetchObjects(repo, plan, wants, haves, shallowHeld);
     const pack = writePack(objects.values());
     const out: Buffer[] = [pktLine('NAK\n')];
     for (const oid of plan.shallow) out.push(pktLine(`shallow ${oid}\n`));
@@ -1889,7 +1929,7 @@ function handleUploadPack(req: IncomingMessage, res: ServerResponse, repo: Repo,
       else if (arg === 'done') done = true;
     }
     const plan = planFetch(repo, wants, haves, shallowHeld, depth);
-    const objects = fetchObjects(repo, plan, wants, haves);
+    const objects = fetchObjects(repo, plan, wants, haves, shallowHeld);
     const pack = writePack(objects.values());
     const out: Buffer[] = [];
     // Real git (and the kit client) send `done` with the fetch: the response then carries
