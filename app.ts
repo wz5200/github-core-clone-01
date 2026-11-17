@@ -772,11 +772,14 @@ function computeMergeable(repo: Repo, pull: Pull): boolean {
 
 function pullHasConflict(repo: Repo, pull: Pull): boolean {
   if (pull.state !== 'open') return false;
-  const base = repo.mergeBase(pull.baseSha, pull.headSha);
+  // Compare against the base branch's CURRENT tip, not the sha captured when the pull
+  // request was opened: a merge that landed after the pull opened moves the base.
+  const baseTipSha = repo.branchTip(pull.baseRef) ?? pull.baseSha;
+  const base = repo.mergeBase(baseTipSha, pull.headSha);
   if (base === null) return false;
   const baseFiles = repo.filesAt(base);
   const headFiles = repo.filesAt(pull.headSha);
-  const baseTipFiles = repo.filesAt(pull.baseSha);
+  const baseTipFiles = repo.filesAt(baseTipSha);
   const paths = new Set([...baseFiles.keys(), ...headFiles.keys(), ...baseTipFiles.keys()]);
   for (const path of paths) {
     const fromBase = baseFiles.get(path)?.oid ?? null;
@@ -795,7 +798,9 @@ function squashMerge(repo: Repo, pull: Pull): string | null {
   if (pullHasConflict(repo, pull)) return null;
   const headFiles = repo.filesAt(pull.headSha);
   const message = `${pull.title} (#${pull.number})`;
-  const mergeSha = repo.commitFiles([pull.baseSha], headFiles, message);
+  // The merge commit parents onto the base branch's current tip.
+  const baseTipSha = repo.branchTip(pull.baseRef) ?? pull.baseSha;
+  const mergeSha = repo.commitFiles([baseTipSha], headFiles, message);
   repo.refs.set(`refs/heads/${pull.baseRef}`, mergeSha);
   pull.state = 'closed';
   pull.merged = true;
@@ -1143,7 +1148,8 @@ async function handleRestRoute(req: IncomingMessage, res: ServerResponse, r: Rou
     const commits = repo.commitsFrom(tip).map(({ sha, commit }) => ({
       sha,
       commit: {
-        message: commit.message,
+        // The API returns the message without the trailing newline the object stores.
+        message: commit.message.replace(/\n+$/, ''),
         author: { name: VIEWER_NAME, email: VIEWER_EMAIL },
         committer: { name: VIEWER_NAME, email: VIEWER_EMAIL },
       },
